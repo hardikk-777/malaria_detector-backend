@@ -9,7 +9,7 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["POST"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -30,18 +30,26 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(req: ChatRequest):
     prompt = f"<s>[INST] {SYSTEM}\n\nUser: {req.message} [/INST]"
-    async with httpx.AsyncClient(timeout=30) as client:
-        res = await client.post(
-            "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
-            headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
-            json={"inputs": prompt, "parameters": {"max_new_tokens": 150, "temperature": 0.7}}
-        )
-        data = res.json()
-        if isinstance(data, list) and data:
-            reply = data[0].get("generated_text", "").split("[/INST]")[-1].strip()
-        else:
-            reply = "Sorry, the model is loading. Please try again in a few seconds."
-    return {"reply": reply}
+    async with httpx.AsyncClient(timeout=60) as client:
+        for attempt in range(3):
+            res = await client.post(
+                "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
+                headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
+                json={
+                    "inputs": prompt,
+                    "parameters": {"max_new_tokens": 150, "temperature": 0.7},
+                    "options": {"wait_for_model": True}
+                }
+            )
+            try:
+                data = res.json()
+                if isinstance(data, list) and data:
+                    reply = data[0].get("generated_text", "").split("[/INST]")[-1].strip()
+                    if reply:
+                        return {"reply": reply}
+            except Exception:
+                pass
+    return {"reply": "Model is warming up, please try again in a moment."}
 
 @app.get("/")
 def root():
