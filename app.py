@@ -15,7 +15,7 @@ app.add_middleware(
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
-SYSTEM = """You are CellScan AI Assistant. This is a malaria blood cell detection project. Key facts:
+SYSTEM = """You are CellScan AI Assistant for a malaria blood cell detection project. Key facts:
 - Model: ResNet18 pretrained on ImageNet, fine-tuned for Parasitized vs Uninfected classification
 - Dataset: NIH Malaria Cell Images, 27,558 images, 70/15/15 split
 - Input: 224x224, ImageNet normalization
@@ -29,12 +29,30 @@ class ChatRequest(BaseModel):
 
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    prompt = f"<s>[INST] {SYSTEM}\n\nUser: {req.message} [/INST]"
+    prompt = f"{SYSTEM}\n\nUser: {req.message}\nAssistant:"
     async with httpx.AsyncClient(timeout=60) as client:
-        for attempt in range(3):
-            res = await client.post(
-                "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
-                headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
+        res = await client.post(
+            "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta",
+            headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
+            json={
+                "inputs": prompt,
+                "parameters": {"max_new_tokens": 150, "temperature": 0.7, "return_full_text": False},
+                "options": {"wait_for_model": True, "use_cache": False}
+            }
+        )
+        try:
+            data = res.json()
+            if isinstance(data, list) and data:
+                reply = data[0].get("generated_text", "").strip()
+                if reply:
+                    return {"reply": reply}
+        except Exception:
+            pass
+    return {"reply": "Sorry, try again in a moment."}
+
+@app.get("/")
+def root():
+    return {"status": "ok"}                headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
                 json={
                     "inputs": prompt,
                     "parameters": {"max_new_tokens": 150, "temperature": 0.7},
