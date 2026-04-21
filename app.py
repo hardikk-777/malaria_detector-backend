@@ -1,38 +1,48 @@
-import gradio as gr
-import torch
-import torch.nn as nn
-from torchvision import models, transforms
-from PIL import Image
-import numpy as np
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import httpx
+import os
 
-# Classes (from your ImageFolder — alphabetical order)
-classes = ["Parasitized", "Uninfected"]
+app = FastAPI()
 
-# Rebuild model architecture
-model = models.resnet18(weights=None)
-model.fc = nn.Linear(model.fc.in_features, 2)
-model.load_state_dict(torch.load("best_resnet18_malaria.pth", map_location="cpu"))
-model.eval()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST"],
+    allow_headers=["*"],
+)
 
-# Same transform you used at test time
-transform = transforms.Compose([
-    transforms.Resize((224, 224)),
-    transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                         std=[0.229, 0.224, 0.225])
-])
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
 
-def predict(img):
-    tensor = transform(img).unsqueeze(0)
-    with torch.no_grad():
-        outputs = model(tensor)
-        probs = torch.softmax(outputs, dim=1)[0]
-    return {classes[i]: float(probs[i]) for i in range(2)}
+SYSTEM = """You are CellScan AI Assistant. This is a malaria blood cell detection project. Key facts:
+- Model: ResNet18 pretrained on ImageNet, fine-tuned for Parasitized vs Uninfected classification
+- Dataset: NIH Malaria Cell Images, 27,558 images, 70/15/15 split
+- Input: 224x224, ImageNet normalization
+- Optimizer: Adam, lr=0.001, CrossEntropyLoss, 10 epochs
+- Val accuracy: ~96.78%
+- Framework: PyTorch, deployed on Hugging Face Spaces with Gradio
+Answer concisely under 80 words."""
 
-gr.Interface(
-    fn=predict,
-    inputs=gr.Image(type="pil"),
-    outputs=gr.Label(num_top_classes=2),
-    title="Malaria Cell Detector",
-    description="Upload a blood cell image. Model will classify it as Parasitized or Uninfected."
-).launch()
+class ChatRequest(BaseModel):
+    message: str
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    prompt = f"<s>[INST] {SYSTEM}\n\nUser: {req.message} [/INST]"
+    async with httpx.AsyncClient(timeout=30) as client:
+        res = await client.post(
+            "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
+            headers={"Authorization": f"Bearer {HF_TOKEN}", "Content-Type": "application/json"},
+            json={"inputs": prompt, "parameters": {"max_new_tokens": 150, "temperature": 0.7}}
+        )
+        data = res.json()
+        if isinstance(data, list) and data:
+            reply = data[0].get("generated_text", "").split("[/INST]")[-1].strip()
+        else:
+            reply = "Sorry, the model is loading. Please try again in a few seconds."
+    return {"reply": reply}
+
+@app.get("/")
+def root():
+    return {"status": "ok"}
