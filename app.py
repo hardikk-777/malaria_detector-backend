@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+rom fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import httpx
@@ -35,6 +35,22 @@ async def chat(req: ChatRequest):
             json={
                 "model": "meta-llama/Llama-3.1-8B-Instruct",
                 "messages": [
+                    {"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": req.message}
+                ],
+                "max_tokens": 120,
+                "temperature": 0.7
+            }
+        )
+
+        data = res.json()
+        print(data)
+
+        try:
+            reply = data["choices"][0]["message"]["content"]
+            return {"reply": reply}
+        except:
+            return {"reply": str(data)}                "messages": [
                     {"role": "system", "content": SYSTEM},
                     {"role": "user", "content": req.message}
                 ],
